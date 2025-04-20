@@ -1,4 +1,3 @@
-//correct prog vs has insect
 #include <iostream>
 using namespace std;
 int main() {
