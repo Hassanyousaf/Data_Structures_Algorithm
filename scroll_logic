@@ -1,0 +1,94 @@
+import cv2
+import numpy as np
+import pyautogui
+import mediapipe as mp
+
+class EyeScroll:
+    def __init__(self):
+        self.mp_face_mesh = mp.solutions.face_mesh
+        self.face_mesh = self.mp_face_mesh.FaceMesh(
+            max_num_faces=1,
+            refine_landmarks=True,
+            min_detection_confidence=0.7,
+            min_tracking_confidence=0.7
+        )
+        self.cap = cv2.VideoCapture(0)
+        self.top_threshold = 0.45 
+        self.bottom_threshold = 0.55
+        self.running = False
+        
+        # Eye landmarks (vertical)
+        self.EYE_INDICES = [
+            27, 23, 130, 243, 
+            159, 145, 386, 374,
+            33, 133, 362, 263
+        ]
+        
+        # For gaze smoothing
+        self.gaze_history = []
+        self.history_length = 5
+
+    def _get_vertical_gaze(self, landmarks, frame_height):
+        """Returns normalized vertical gaze position (0=top, 1=bottom)"""
+        eye_points = np.array([(landmarks.landmark[i].x, landmarks.landmark[i].y) 
+                             for i in self.EYE_INDICES])
+        eye_center_y = np.mean(eye_points[:, 1])
+        return eye_center_y
+
+    def start_scroll(self):
+        self.running = True
+        while self.running:
+            ret, frame = self.cap.read()
+            if not ret:
+                break
+
+            # Process frame
+            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            results = self.face_mesh.process(rgb)
+
+            if results.multi_face_landmarks:
+                landmarks = results.multi_face_landmarks[0]
+                h, w = frame.shape[:2]
+                
+                # vertical gaze position
+                gaze_y = self._get_vertical_gaze(landmarks, h)
+                
+                # Smooth gaze with moving average
+                self.gaze_history.append(gaze_y)
+                if len(self.gaze_history) > self.history_length:
+                    self.gaze_history.pop(0)
+                smoothed_gaze = np.mean(self.gaze_history)
+                
+                # Visual feedback
+                cv2.putText(frame, f"Vertical Gaze: {smoothed_gaze:.2f}", (10, 30), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                
+                # Draw threshold lines
+                cv2.line(frame, (0, int(h * self.top_threshold)), 
+                         (w, int(h * self.top_threshold)), (0, 255, 0), 2)
+                cv2.line(frame, (0, int(h * self.bottom_threshold)), 
+                         (w, int(h * self.bottom_threshold)), (0, 255, 0), 2)
+                
+                # Scroll logic
+                action = None
+                if smoothed_gaze < self.top_threshold:
+                    pyautogui.scroll(25)  # Scroll up
+                    action = "SCROLL UP"
+                elif smoothed_gaze > self.bottom_threshold:
+                    pyautogui.scroll(-25)  # Scroll down
+                    action = "SCROLL DOWN"
+                
+                if action:
+                    cv2.putText(frame, action, (10, 70), 
+                               cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
+
+            cv2.imshow("Vertical Eye Scroll (ESC to quit)", frame)
+            if cv2.waitKey(1) == 27:
+                break
+
+        self.cap.release()
+        cv2.destroyAllWindows()
+
+if __name__ == "__main__":
+    scroller = EyeScroll()
+    scroller.start_scroll()
